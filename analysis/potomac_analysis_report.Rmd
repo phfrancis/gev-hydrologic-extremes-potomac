@@ -1,0 +1,481 @@
+---
+title: "Extreme Value Analysis of Potomac River Discharge"
+author: "Francis Yap"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: flatly
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(readr)
+  library(ggplot2)
+  library(knitr)
+  library(scales)
+  library(htmltools)
+})
+
+dir.create("outputs", showWarnings = FALSE)
+dir.create("figures", showWarnings = FALSE)
+
+# Source the computational engine.
+# Keep this R script in the same folder as this Rmd.
+source("potomac_results_submission_final.r")
+
+# Helper for embedding saved PDF outputs in HTML.
+embed_pdf <- function(path, height = "520px") {
+  if (!file.exists(path)) {
+    return(HTML(paste0(
+      "<p><em>File not found: ", path, "</em></p>"
+    )))
+  }
+
+  tags$iframe(
+    src = path,
+    width = "100%",
+    height = height,
+    style = "border: 1px solid #ddd;"
+  )
+}
+
+fmt_cfs <- function(x) {
+  scales::comma(round(x, 0))
+}
+```
+
+```{r convert-pdfs, include=FALSE}
+if (!requireNamespace("pdftools", quietly = TRUE)) {
+  install.packages("pdftools")
+}
+
+pdf_files <- list.files(
+  fig_dir,
+  pattern = "\\.pdf$",
+  full.names = TRUE
+)
+
+png_files <- sub("\\.pdf$", ".png", pdf_files)
+
+for (i in seq_along(pdf_files)) {
+  if (!file.exists(png_files[i])) {
+    pdftools::pdf_convert(
+      pdf = pdf_files[i],
+      format = "png",
+      dpi = 300,
+      pages = 1,
+      filenames = png_files[i]
+    )
+  }
+}
+```
+# Executive Summary
+
+This project applies extreme-value methods to annual maximum daily discharge
+from the Potomac River at Little Falls. The analysis estimates return levels
+using Generalized Extreme Value (GEV) and Gumbel models, evaluates uncertainty
+with profile-likelihood confidence intervals, and studies sampling behavior
+through parametric and year-resampling simulations.
+
+The workflow is separated into two layers:
+
+The R script contains the computational engine.
+This R Markdown report loads cached results and presents the analysis.
+
+Heavy simulations are cached as .rds files so that the report can be
+re-rendered quickly after the first complete run.
+
+## Key Findings
+
+- GEV model provides better tail fit than Gumbel  
+- Uncertainty increases substantially for return periods beyond 100 years  
+- Simulation shows bias decreases as record length increases  
+- Confidence interval coverage improves with sample size but remains imperfect for small samples
+
+# Reproducibility Settings
+```{r}
+tibble::tibble(
+  setting = c(
+    "Random seed",
+    "Return periods for empirical analysis",
+    "Simulation record lengths",
+    "Simulation return periods",
+    "Parametric simulation replicates",
+    "Year-resampling replicates",
+    "Figure output directory"
+  ),
+  value = c(
+    "8010",
+    paste(T_vals_res, collapse = ", "),
+    paste(n_grid_sim, collapse = ", "),
+    paste(periods_sim, collapse = ", "),
+    as.character(B_param),
+    as.character(B_resamp),
+    "figures/"
+  )
+) |>
+  knitr::kable(caption = "Main reproducibility settings used in the analysis.")
+```
+Load or Run Analysis Objects
+
+The following chunks load cached .rds files when available. If the cache files
+do not exist, the corresponding workflow is executed and saved for future use.
+```{r}
+results_file <- "outputs/results_obj.rds"
+
+if (file.exists(results_file)) {
+  results_obj <- readRDS(results_file)
+} else {
+  results_obj <- run_results_workflow()
+  saveRDS(results_obj, results_file)
+}
+```
+
+```{r}
+param_file <- "outputs/sim_param_obj.rds"
+
+if (file.exists(param_file)) {
+  sim_param_obj <- readRDS(param_file)
+} else {
+  sim_param_obj <- run_parametric_simulation(
+    mu0 = results_obj$gev_ismev_mle["mu"],
+    sigma0 = results_obj$gev_ismev_mle["sigma"],
+    xi0 = results_obj$gev_ismev_mle["xi"]
+  )
+
+  saveRDS(sim_param_obj, param_file)
+}
+```
+
+```{r}
+resamp_file <- "outputs/sim_resamp_obj.rds"
+
+if (file.exists(resamp_file)) {
+  sim_resamp_obj <- readRDS(resamp_file)
+} else {
+  sim_resamp_obj <- run_year_resampling_simulation(
+    daily_df = results_obj$daily,
+    mu0 = results_obj$gev_ismev_mle["mu"],
+    sigma0 = results_obj$gev_ismev_mle["sigma"],
+    xi0 = results_obj$gev_ismev_mle["xi"]
+  )
+
+  saveRDS(sim_resamp_obj, resamp_file)
+}
+```
+
+```{r}
+run_simulation_supplement(sim_param_obj, sim_resamp_obj)
+```
+# Data Overview
+```{r}
+data_summary <- tibble::tibble(
+  quantity = c(
+    "Daily observations",
+    "Annual maxima",
+    "First year",
+    "Last year",
+    "Minimum annual maximum discharge",
+    "Median annual maximum discharge",
+    "Maximum annual maximum discharge"
+  ),
+  value = c(
+    nrow(results_obj$daily),
+    nrow(results_obj$am),
+    min(results_obj$am$year),
+    max(results_obj$am$year),
+    fmt_cfs(min(results_obj$am$block_max)),
+    fmt_cfs(median(results_obj$am$block_max)),
+    fmt_cfs(max(results_obj$am$block_max))
+  )
+)
+
+knitr::kable(data_summary, caption = "Summary of the daily series and annual maxima.")
+```
+# Empirical Extreme-Value Analysis
+
+## Annual Maxima and Stationarity
+
+The annual maximum series is the basis for the block-maxima extreme-value
+analysis. A linear smoother is shown as a visual diagnostic, while formal
+trend evidence is summarized separately using the Mann-Kendall test and a
+stationary versus nonstationary GEV likelihood-ratio comparison.
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_stationarity.png"))
+```
+
+```{r}
+mk_path <- file.path(fig_dir, "project_mann_kendall_summary.csv")
+lrt_path <- file.path(fig_dir, "project_stationarity_lrt_summary.csv")
+
+if (file.exists(mk_path)) {
+  readr::read_csv(mk_path, show_col_types = FALSE) |>
+    knitr::kable(digits = 4, caption = "Mann-Kendall trend-test summary.")
+}
+
+if (file.exists(lrt_path)) {
+  readr::read_csv(lrt_path, show_col_types = FALSE) |>
+    knitr::kable(digits = 4, caption = "Stationary versus nonstationary GEV likelihood-ratio summary.")
+}
+```
+## Model Diagnostic Plot
+
+The Q-Q plot compares empirical annual maxima against fitted model quantiles.
+Closer agreement with the identity line indicates better distributional fit.
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_qq.png"))
+```
+## Return-Level Estimates
+
+Return levels are estimated for both GEV and Gumbel models using
+profile-likelihood confidence intervals. Uncertainty increases for longer
+return periods because these estimates require greater extrapolation into
+the upper tail.
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_return_levels_ci.png"))
+```
+
+```{r}
+results_obj$rl_ci_long |>
+  filter(T %in% c(10, 25, 50, 100, 150, 200)) |>
+  mutate(
+    RL = fmt_cfs(RL),
+    CI_low = fmt_cfs(CI_low),
+    CI_high = fmt_cfs(CI_high)
+  ) |>
+  arrange(model, T) |>
+  knitr::kable(
+    caption = "Selected return-level estimates with 95% confidence intervals."
+  )
+```
+## Confidence-Interval Widths
+
+The width of the return-level confidence interval provides a direct summary
+of estimation uncertainty. Wider intervals at larger return periods reflect
+the difficulty of estimating rare events from a finite annual-maxima record.
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_return_levels_ciwidth.png"))
+```
+
+```{r}
+xi_path <- file.path(fig_dir, "project_xi_profile_ci.csv")
+
+if (file.exists(xi_path)) {
+  readr::read_csv(xi_path, show_col_types = FALSE) |>
+    mutate(
+      Estimate = round(Estimate, 4),
+      CI_low = round(CI_low, 4),
+      CI_high = round(CI_high, 4)
+    ) |>
+    knitr::kable(caption = "Profile-likelihood confidence interval for the GEV shape parameter.")
+}
+```
+## Supplementary Empirical Diagnostics
+
+Daily Series and Annual Maxima
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_daily_series_with_annual_maxima.png"))
+```
+Seasonality of Monthly Maxima
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_monthly_maxima_seasonality.png"))
+```
+Month of Annual Maximum Occurrence
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "project_annual_maxima_month_counts.png"))
+```
+
+```{r}
+month_path <- file.path(fig_dir, "project_annual_maxima_month_counts.csv")
+
+if (file.exists(month_path)) {
+  readr::read_csv(month_path, show_col_types = FALSE) |>
+    knitr::kable(caption = "Month-of-occurrence counts for annual maximum discharge.")
+}
+```
+## Parametric Simulation Study
+
+The parametric simulation evaluates how well the GEV estimation workflow
+recovers known return levels when samples are generated directly from the
+fitted GEV model. This provides a controlled assessment of bias, RMSE,
+coverage, and confidence-interval width as record length increases.
+
+Parameter Estimation
+```{r}
+sim_param_obj$param_sum |>
+  mutate(across(where(is.numeric), ~ round(.x, 4))) |>
+  knitr::kable(caption = "Parametric simulation summary for GEV parameter estimates.")
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_xi_boxplot.png"))
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_param_bias_vs_n.png"))
+```
+Return-Level Bias and RMSE
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_rl_bias_vs_n_mean.png"))
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_rl_rmse_vs_n.png"))
+```
+Confidence-Interval Coverage
+
+Coverage is reported conditional on successful confidence-interval fits.
+This distinction matters because profile-likelihood intervals may occasionally
+fail for short or unstable simulated samples.
+```{r}
+sim_param_obj$ci_sum |>
+  mutate(
+    coverage = round(coverage, 3),
+    mean_width = fmt_cfs(mean_width)
+  ) |>
+  knitr::kable(caption = "Parametric simulation confidence-interval coverage and mean width.")
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_coverage_vs_n.png"))
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_ci_width_vs_n.png"))
+```
+GEV versus Gumbel Simulation Comparison
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_gumbel_vs_gev_bias_mean.png"))
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_gumbel_vs_gev_rmse_mean.png"))
+```
+Distribution of Estimated 100-Year Return Levels
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "sim_param_rl_distribution_100yr.png"))
+```
+
+```{r}
+param_rl100_path <- file.path(fig_dir, "sim_param_rl100_summary_stats.csv")
+
+if (file.exists(param_rl100_path)) {
+  readr::read_csv(param_rl100_path, show_col_types = FALSE) |>
+    mutate(across(where(is.numeric), ~ round(.x, 2))) |>
+    knitr::kable(caption = "Parametric simulation summary statistics for the estimated 100-year return level.")
+}
+```
+## Year-Resampling Robustness Study
+
+The year-resampling experiment resamples full years from the observed daily
+record, recomputes annual maxima, and refits the GEV model. This assesses
+how sensitive return-level estimates are to the available historical record.
+
+Reference Inclusion and Interval Width
+```{r}
+sim_resamp_obj$ci |>
+  mutate(
+    coverage_reference = round(coverage_reference, 3),
+    mean_width = fmt_cfs(mean_width)
+  ) |>
+  knitr::kable(caption = "Year-resampling reference inclusion rates and mean confidence-interval widths.")
+```
+
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "resample_coverage_vs_n.png"))
+```
+Distribution of Estimated 100-Year Return Levels
+```{r, out.width="95%", fig.align="center"}
+knitr::include_graphics(file.path(fig_dir, "resample_rl_distribution_100yr.png"))
+```
+
+```{r}
+resamp_rl100_path <- file.path(fig_dir, "sim_resample_rl100_summary_stats.csv")
+
+if (file.exists(resamp_rl100_path)) {
+  readr::read_csv(resamp_rl100_path, show_col_types = FALSE) |>
+    mutate(across(where(is.numeric), ~ round(.x, 2))) |>
+    knitr::kable(caption = "Year-resampling summary statistics for the estimated 100-year return level.")
+}
+```
+## Generated Output Files
+
+The following files are the final figures, tables, diagnostics, and cached
+objects used in this report. Earlier exploratory outputs have been excluded
+to keep the results concise and reproducible.
+```{r generated-files}
+final_output_files <- c(
+  "project_stationarity.png",
+  "project_mann_kendall_summary.csv",
+  "project_stationarity_lrt_summary.csv",
+  "project_qq.png",
+  "project_return_levels_ci.png",
+  "project_return_levels_ci_diagnostics.csv",
+  "project_return_levels_ciwidth.png",
+  "project_xi_profile_ci.csv",
+  "project_daily_series_with_annual_maxima.png",
+  "project_monthly_maxima_seasonality.png",
+  "project_annual_maxima_month_counts.png",
+  "project_annual_maxima_month_counts.csv",
+  "sim_xi_boxplot.png",
+  "sim_param_bias_vs_n.png",
+  "sim_rl_bias_vs_n_mean.png",
+  "sim_rl_rmse_vs_n.png",
+  "sim_ci_summary.csv",
+  "sim_coverage_vs_n.png",
+  "sim_ci_width_vs_n.png",
+  "sim_gumbel_vs_gev_bias_mean.png",
+  "sim_gumbel_vs_gev_rmse_mean.png",
+  "sim_param_rl_distribution_100yr.png",
+  "sim_param_rl100_summary_stats.csv",
+  "resample_ci_summary.csv",
+  "resample_coverage_vs_n.png",
+  "resample_rl_distribution_100yr.png",
+  "sim_resample_rl100_summary_stats.csv"
+)
+
+generated_files <- tibble::tibble(
+  file = c(
+    final_output_files,
+    "results_obj.rds",
+    "sim_param_obj.rds",
+    "sim_resamp_obj.rds"
+  ),
+  location = c(
+    rep("figures/", length(final_output_files)),
+    rep("outputs/", 3)
+  )
+) |>
+  dplyr::mutate(
+    exists = c(
+      file.exists(file.path(fig_dir, final_output_files)),
+      file.exists(file.path("outputs", "results_obj.rds")),
+      file.exists(file.path("outputs", "sim_param_obj.rds")),
+      file.exists(file.path("outputs", "sim_resamp_obj.rds"))
+    )
+  )
+
+generated_files |>
+  dplyr::filter(exists) |>
+  dplyr::select(file, location) |>
+  knitr::kable(caption = "Final analysis outputs used in this report.")
+```
+All listed files are reproducible from the provided R script and cached objects.
+
+## Reproducibility Information
+```{r}
+sessionInfo()
+```
