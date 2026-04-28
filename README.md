@@ -8,6 +8,22 @@ Using a 95-year record, the analysis employs a stationary block-maxima framework
 
 **Key takeaway:** Extreme flood behavior exhibits heavy-tailed characteristics, and uncertainty increases substantially for longer return periods, highlighting challenges in predicting rare hydrologic events.
 
+---
+
+## 📄 Full Report
+
+To view the complete analysis:
+
+- **Recommended:**  
+  👉 [Open the PDF report](report/potomac_analysis_report.pdf)
+
+- **HTML version (better formatting):**  
+  👉 [Download and open the HTML report](report/potomac_analysis_report.html)
+
+> Note: GitHub cannot preview large HTML files directly. After downloading, open the file in your browser.
+
+---
+
 ## Methods
 
 - Annual block maxima extraction
@@ -21,6 +37,8 @@ Using a 95-year record, the analysis employs a stationary block-maxima framework
 - Parametric GEV simulation
 - Year-resampling robustness analysis
 
+---
+
 ## Key Findings
 
 - The GEV model was favored over the constrained Gumbel model.
@@ -29,12 +47,16 @@ Using a 95-year record, the analysis employs a stationary block-maxima framework
 - Simulation results showed that estimation error was primarily driven by sampling variability.
 - Longer records improved precision, though profile-likelihood intervals could undercover in moderate samples.
 
+---
+
 ## Tools & Techniques
 
-- R
-- R Markdown
-- Extreme value modeling packages (e.g., `extRemes`, `ismev`)
-- ggplot2
+- R  
+- R Markdown  
+- Extreme value modeling packages (e.g., `extRemes`, `ismev`)  
+- ggplot2  
+
+---
 
 ## Repository Structure
 
