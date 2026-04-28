@@ -2,22 +2,22 @@
 
 ## Overview
 
-This repository contains my master's project in Mathematical Sciences at Clemson University.
+This project applies extreme value theory (EVT) to analyze and model flood risk using annual maximum river discharge data from the Potomac River at Little Falls (USGS 01646500).
 
-The project analyzes annual maximum river discharge for the Potomac River at Little Falls (USGS 01646500) using a stationary block-maxima framework and generalized extreme value (GEV) modeling.
+Using a 95-year record, the analysis employs a stationary block-maxima framework and generalized extreme value (GEV) modeling to estimate extreme flood magnitudes, compare tail behavior, and quantify uncertainty in return-level predictions.
 
-The goal is to estimate extreme flood magnitudes, compare tail assumptions, and evaluate finite-sample reliability of return-level inference.
+**Key takeaway:** Extreme flood behavior exhibits heavy-tailed characteristics, and uncertainty increases substantially for longer return periods, highlighting challenges in predicting rare hydrologic events.
 
 ## Methods
 
-- Annual block maxima
+- Annual block maxima extraction
 - Generalized Extreme Value (GEV) modeling
-- Gumbel model comparison
-- Maximum likelihood estimation
-- Likelihood ratio testing
+- Gumbel (ξ = 0) model comparison
+- Maximum likelihood estimation (MLE)
+- Likelihood ratio testing (LRT)
 - Profile-likelihood confidence intervals
-- Mann-Kendall trend assessment
-- Monte Carlo simulation
+- Mann–Kendall trend assessment
+- Monte Carlo simulation study
 - Parametric GEV simulation
 - Year-resampling robustness analysis
 
@@ -25,15 +25,15 @@ The goal is to estimate extreme flood magnitudes, compare tail assumptions, and 
 
 - The GEV model was favored over the constrained Gumbel model.
 - The fitted GEV model indicated heavier upper-tail behavior.
-- Return-level uncertainty increased for longer return periods.
-- Simulation results showed that estimation error was driven mainly by sampling variability.
-- Longer records improved precision, but profile-likelihood intervals could undercover in moderate samples.
+- Return-level uncertainty increased with longer return periods.
+- Simulation results showed that estimation error was primarily driven by sampling variability.
+- Longer records improved precision, though profile-likelihood intervals could undercover in moderate samples.
 
-## Tools
+## Tools & Techniques
 
 - R
 - R Markdown
-- Extreme value modeling packages
+- Extreme value modeling packages (e.g., `extRemes`, `ismev`)
 - ggplot2
 
 ## Repository Structure
